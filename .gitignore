@@ -1,0 +1,14 @@
+.idea/*
+data/*
+*.swp
+*.iml
+ext/*java/.classpath/*
+java/.project/*
+java/.settings/*
+java/.classpath
+java/.project
+java/.idea/*
+pid_file.txt
+log.txt
+calls_agg/target/*
+calls_enr_customers/target/*

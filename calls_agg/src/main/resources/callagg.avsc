@@ -1,0 +1,12 @@
+{"namespace": "com.harold.kafka.streams.schemas.avro",
+ "type": "record",
+ "name": "CallAggregate",
+ "fields": [
+     {"name": "id_telef_origen", "type": "string"},
+     {"name": "window_start_ts", "type": "string"},
+     {"name": "calls_count", "type": "int"},
+     {"name": "max_duracion_origen", "type": "long"},
+     {"name": "total_duracion_origen", "type": "long"},
+     {"name": "avg_duracion_origen", "type": "int"}
+ ]
+}

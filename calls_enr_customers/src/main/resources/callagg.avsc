@@ -1,0 +1,17 @@
+{"namespace": "com.harold.kafka.streams.schemas.avro",
+ "type": "record",
+ "name": "CallAggregate",
+ "fields": [
+     {"name": "id_telef_origen", "type": "string"},
+     {"name": "window_start_ts", "type": "string"},
+     {"name": "calls_count", "type": "int"},
+     {"name": "max_duracion_origen", "type": "int"},
+     {"name": "total_duracion_origen", "type": "int"},
+     {"name": "avg_duracion_origen", "type": "int"},
+     {"name": "doc_cliente", "type": "string"},
+     {"name": "cliente_orange", "type": "int"},
+     {"name": "days_excliente", "type": "int"},
+     {"name": "operador_actual", "type": "string"},
+     {"name": "riesgo", "type":  "string"}
+ ]
+}
