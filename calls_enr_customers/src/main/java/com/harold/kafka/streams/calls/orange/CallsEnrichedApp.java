@@ -24,27 +24,26 @@ import org.apache.kafka.streams.state.KeyValueStore;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Instant;
-import java.util.Collections;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Date;
+import java.util.*;
 import java.text.SimpleDateFormat;
 
 //import org.apache.kafka.streams.Consumed;
 
 public class CallsEnrichedApp {
 
-    private static String clientId = "calls-orange";
-    private static String groupId = "rosetta";
-    private static String endpoints = "localhost:9092";
-    private static String table_calls = "CALLS_AGG";
-    private static String table_clientes = "CLIENTES_PORTA_SCR_T";
-    private static String autoOffsetResetPolicy = "earliest";
-    private static String streamsNumOfThreads = "3";
-    private static String schemaRegistryUrl = "http://localhost:8081";
-    private static String keySerde = "org.apache.kafka.common.serialization.Serdes$StringSerde";
-    private static String valueSerde = GenericAvroSerde.class.getCanonicalName();
-    private static String deserializationExceptionHandler = LogAndContinueExceptionHandler.class.getCanonicalName();
+    static final String clientId = "calls-orange";
+    static final String groupId = "rosetta";
+    static final String endpoints = "localhost:9092";
+    static final String table_calls = "CALLS_AGG";
+    static final String table_clientes = "CLIENTES_PORTA_SCR_T";
+    static final String stream_call_clientes = "CALLS_CLIENTES_ENR";
+    static final String autoOffsetResetPolicy = "earliest";
+    static final String streamsNumOfThreads = "3";
+    static final String schemaRegistryUrl = "http://localhost:8081";
+    //static final String schemaRegistryUrl = "mock://com.harold.kafka.streams.calls.orange.CallsEnrichedAppTest";
+    static final String keySerde = "org.apache.kafka.common.serialization.Serdes$StringSerde";
+    //static final String valueSerde = GenericAvroSerde.class.getCanonicalName();
+    static final String deserializationExceptionHandler = LogAndContinueExceptionHandler.class.getCanonicalName();
 
     public Topology createTopology() throws IOException {
         // json Serde
@@ -60,25 +59,17 @@ public class CallsEnrichedApp {
         final InputStream
                 callsAggregateSchema =
                 CallsEnrichedApp.class.getClassLoader()
-                        .getResourceAsStream("callagg.avsc");
+                        .getResourceAsStream("callaggcust.avsc");
         final Schema schema = new Schema.Parser().parse(callsAggregateSchema);
 
         StreamsBuilder builder = new StreamsBuilder();
-        
-        KTable<String, JsonNode> customerEnr = builder.table(table_clientes, Consumed.with(stringSerde, jsonSerde));
 
-        KTable<String, GenericRecord> callAgg = builder.table(table_calls, Consumed.with(stringSerde, valueAvroSerde));
+        KStream<String, JsonNode> customerEnr = builder.stream(table_clientes, Consumed.with(stringSerde, jsonSerde));
 
-        KTable<String, GenericRecord> callAggRekeyed = callAgg
-                .toStream()
-                .selectKey((key, value) -> value.get("ID_TELEF_ORIGEN").toString())
-                //.map((k, v) -> new KeyValue<>(v.get("ID_TELEF_ORIGEN").toString(), v))
-                .groupByKey()
-                //.groupBy((k, v) -> KeyValue.pair((String)v.get("id_telef_origen"), v))
-                .aggregate(
-                        () -> null,
-                        (key, value, aggregate) -> value,
-                        Materialized.with(stringSerde,valueAvroSerde));
+        KStream<String, GenericRecord> callAgg = builder.stream(table_calls, Consumed.with(stringSerde, valueAvroSerde));
+
+        KStream<String, GenericRecord> callAggRekeyed = callAgg
+                .selectKey((key, value) -> value.get("ID_TELEF_ORIGEN").toString());
 
         // create the initial json object for balances
         ObjectNode initialCustomer = JsonNodeFactory.instance.objectNode();
@@ -89,9 +80,7 @@ public class CallsEnrichedApp {
         initialCustomer.put("riesgo", "");
 
         KTable<String, JsonNode> customerEnrRekeyed = customerEnr
-                .toStream()
                 .selectKey((key, value) -> value.get("TELEFONO").asText())
-                //.map((k, v) -> new KeyValue<>(v.get("TELEFONO").asText(), v))
                 .groupByKey()
                 .aggregate(
                         () -> initialCustomer,
@@ -101,8 +90,8 @@ public class CallsEnrichedApp {
                                 .withValueSerde(jsonSerde)
                 );
 
-        KTable<String, GenericRecord> callsCustomerJoin = callAggRekeyed
-                .join(customerEnrRekeyed, (call, customer) -> {
+        KStream<String, GenericRecord> callsCustomerJoin = callAggRekeyed
+                .leftJoin(customerEnrRekeyed, (call, customer) -> {
                     final GenericRecord callCustomer = new GenericData.Record(schema);
                     callCustomer.put("id_telef_origen", call.get("ID_TELEF_ORIGEN").toString());
                     callCustomer.put("window_start_ts", call.get("WINDOW_START_TS").toString());
@@ -110,15 +99,15 @@ public class CallsEnrichedApp {
                     callCustomer.put("max_duracion_origen", call.get("MAX_DURACION_ORIGEN"));
                     callCustomer.put("total_duracion_origen", call.get("TOTAL_DURACION_ORIGEN"));
                     callCustomer.put("avg_duracion_origen", call.get("AVG_DURACION_ORIGEN"));
-                    callCustomer.put("doc_cliente", customer.get("DOC_CLIENTE").asText());
-                    callCustomer.put("cliente_orange", customer.get("CLIENTE_ORANGE").asInt());
-                    callCustomer.put("days_excliente", customer.get("DAYS_EXCLIENTE").asInt());
-                    callCustomer.put("operador_actual", customer.get("OPERADOR_ACTUAL").asText());
-                    callCustomer.put("riesgo", customer.get("RIESGO").asText());
+                    callCustomer.put("doc_cliente", customer == null ? null : customer.get("DOC_CLIENTE").asText());
+                    callCustomer.put("cliente_orange", customer == null ? null : customer.get("CLIENTE_ORANGE").asInt());
+                    callCustomer.put("days_excliente", customer == null ? null : customer.get("DAYS_EXCLIENTE").asInt());
+                    callCustomer.put("operador_actual", customer == null ? null : customer.get("OPERADOR_ACTUAL").asText());
+                    callCustomer.put("riesgo", customer == null ? null : customer.get("RIESGO").asText());
                     return callCustomer;
                 });
 
-        callsCustomerJoin.toStream().to("CALLS_CLIENTES_ENR", Produced.with(stringSerde,valueAvroSerde));
+        callsCustomerJoin.to(stream_call_clientes, Produced.with(stringSerde,valueAvroSerde));
 
         return builder.build();
     }
@@ -137,6 +126,8 @@ public class CallsEnrichedApp {
         config.put(KafkaAvroDeserializerConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
 
         CallsEnrichedApp callsEnrichedApp = new CallsEnrichedApp();
+
+
 
         KafkaStreams streams = new KafkaStreams(callsEnrichedApp.createTopology(), config);
         streams.cleanUp();

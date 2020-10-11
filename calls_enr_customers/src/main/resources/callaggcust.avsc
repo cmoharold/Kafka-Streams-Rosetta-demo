@@ -1,6 +1,6 @@
 {"namespace": "com.harold.kafka.streams.schemas.avro",
  "type": "record",
- "name": "CallAggregate",
+ "name": "CallAggregateCust",
  "fields": [
      {"name": "id_telef_origen", "type": "string"},
      {"name": "window_start_ts", "type": "string"},
@@ -8,10 +8,10 @@
      {"name": "max_duracion_origen", "type": "int"},
      {"name": "total_duracion_origen", "type": "int"},
      {"name": "avg_duracion_origen", "type": "int"},
-     {"name": "doc_cliente", "type": "string"},
-     {"name": "cliente_orange", "type": "int"},
-     {"name": "days_excliente", "type": "int"},
-     {"name": "operador_actual", "type": "string"},
-     {"name": "riesgo", "type":  "string"}
+     {"name": "doc_cliente", "type": ["null","string"], "default": null},
+     {"name": "cliente_orange", "type": ["null","int"], "default": null},
+     {"name": "days_excliente", "type": ["null","int"], "default": null},
+     {"name": "operador_actual", "type": ["null","string"], "default": null},
+     {"name": "riesgo", "type": ["null","string"], "default": null}
  ]
 }
