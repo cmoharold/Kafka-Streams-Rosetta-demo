@@ -8,6 +8,7 @@ import io.confluent.kafka.streams.serdes.avro.GenericAvroSerde;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.commons.lang3.time.DateUtils;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.apache.kafka.common.serialization.Serde;
@@ -23,7 +24,6 @@ import org.apache.kafka.streams.state.KeyValueStore;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.time.Instant;
 import java.util.*;
 import java.text.SimpleDateFormat;
 
@@ -94,7 +94,8 @@ public class CallsEnrichedApp {
                 .leftJoin(customerEnrRekeyed, (call, customer) -> {
                     final GenericRecord callCustomer = new GenericData.Record(schema);
                     callCustomer.put("id_telef_origen", call.get("ID_TELEF_ORIGEN").toString());
-                    callCustomer.put("window_start_ts", call.get("WINDOW_START_TS").toString());
+                    callCustomer.put("window_start_ts", getReadableDate(new Long(call.get("WINDOW_START_TS").toString())));
+                    callCustomer.put("window_end_ts", getReadableDatePlusOneHour(new Long(call.get("WINDOW_START_TS").toString())));
                     callCustomer.put("calls_count", call.get("CALLS_COUNT"));
                     callCustomer.put("max_duracion_origen", call.get("MAX_DURACION_ORIGEN"));
                     callCustomer.put("total_duracion_origen", call.get("TOTAL_DURACION_ORIGEN"));
@@ -142,6 +143,16 @@ public class CallsEnrichedApp {
 
     private static Map<String, String> getSerdeProperties() {
         return Collections.singletonMap(KafkaAvroDeserializerConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
+    }
+
+    public String getReadableDate(Long epoch) {
+        String date = new SimpleDateFormat("dd/MM/yyyy HH:mm").format(new Date(epoch));
+        return date;
+    }
+
+    public String getReadableDatePlusOneHour(Long epoch) {
+        String date = new SimpleDateFormat("dd/MM/yyyy HH:mm").format(DateUtils.addHours(new Date(epoch),1));
+        return date;
     }
 
 }

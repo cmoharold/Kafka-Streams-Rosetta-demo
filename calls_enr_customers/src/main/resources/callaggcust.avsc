@@ -4,6 +4,7 @@
  "fields": [
      {"name": "id_telef_origen", "type": "string"},
      {"name": "window_start_ts", "type": "string"},
+     {"name": "window_end_ts", "type": "string"},
      {"name": "calls_count", "type": "int"},
      {"name": "max_duracion_origen", "type": "int"},
      {"name": "total_duracion_origen", "type": "int"},

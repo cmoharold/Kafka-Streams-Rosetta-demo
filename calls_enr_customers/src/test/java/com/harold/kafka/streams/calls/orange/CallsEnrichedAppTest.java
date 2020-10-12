@@ -49,6 +49,8 @@ public class CallsEnrichedAppTest {
     private StringSerializer stringSerializer = new StringSerializer();
     private StringDeserializer stringDeserializer = new StringDeserializer();
 
+    private CallsEnrichedApp callsEnrichedApp = new CallsEnrichedApp();
+
     private static final String SCHEMA_REGISTRY_SCOPE = CallsEnrichedAppTest.class.getName();
     private static final String MOCK_SCHEMA_REGISTRY_URL = "mock://" + SCHEMA_REGISTRY_SCOPE;
 
@@ -70,7 +72,7 @@ public class CallsEnrichedAppTest {
         config.put(StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG, LogAndContinueExceptionHandler.class.getCanonicalName());
         config.put(KafkaAvroDeserializerConfig.SCHEMA_REGISTRY_URL_CONFIG, MOCK_SCHEMA_REGISTRY_URL);
 
-        CallsEnrichedApp callsEnrichedApp = new CallsEnrichedApp();
+
 
         Topology topology = callsEnrichedApp.createTopology();
         testDriver = new TopologyTestDriver(topology, config);
@@ -154,6 +156,17 @@ public class CallsEnrichedAppTest {
         inputTopicCustomers.pipeInput(telefono,getInputRecordCustomer(telefono));
         inputTopicCalls.pipeInput(telefono,getInputRecordCall(telefono));
         assertEquals(outputTopic.readValue().get("calls_count"),getInputRecordCall(telefono).get("CALLS_COUNT"));
+        assertTrue(outputTopic.isEmpty());
+    }
+
+    @Test
+    public void makeSureCalculationCorrectEndTime(){
+        assertTrue(outputTopic.isEmpty());
+        String telefono = "600000000";
+        inputTopicCustomers.pipeInput(telefono,getInputRecordCustomer(telefono));
+        inputTopicCalls.pipeInput(telefono,getInputRecordCall(telefono));
+        assertEquals(outputTopic.readValue().get("window_end_ts").toString(),
+                callsEnrichedApp.getReadableDatePlusOneHour(((Long) getInputRecordCall(telefono).get("WINDOW_START_TS"))));
         assertTrue(outputTopic.isEmpty());
     }
 }
