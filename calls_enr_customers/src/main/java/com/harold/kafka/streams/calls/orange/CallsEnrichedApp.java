@@ -27,23 +27,37 @@ import java.io.InputStream;
 import java.util.*;
 import java.text.SimpleDateFormat;
 
-//import org.apache.kafka.streams.Consumed;
+import com.harold.kafka.streams.calls.utils.envProps;
 
 public class CallsEnrichedApp {
 
-    static final String clientId = "calls-orange";
-    static final String groupId = "rosetta";
-    static final String endpoints = "localhost:9092";
-    static final String table_calls = "CALLS_AGG";
-    static final String table_clientes = "CLIENTES_PORTA_SCR_T";
-    static final String stream_call_clientes = "CALLS_CLIENTES_ENR";
-    static final String autoOffsetResetPolicy = "earliest";
-    static final String streamsNumOfThreads = "3";
-    static final String schemaRegistryUrl = "http://localhost:8081";
+    static final String clientId = envProps.getEnvValue(envProps.APPLICATION_ID_CONFIG, "calls-orange");
+    static final String groupId = envProps.getEnvValue(envProps.GROUP_ID_CONFIG, "rosetta");
+    static final String endpoints = envProps.getEnvValue(envProps.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+    static final String table_calls = envProps.getEnvValue(envProps.INPUT_TOPIC_CALLS, "CALLS_AGG");
+    static final String table_clientes = envProps.getEnvValue(envProps.INPUT_TOPIC_CUSTOMERS, "CLIENTES_PORTA_SCR_T");
+    static final String stream_call_clientes = envProps.getEnvValue(envProps.OUTPUT_TOPIC, "CALLS_CLIENTES_ENR");
+    static final String autoOffsetResetPolicy = envProps.getEnvValue(envProps.AUTO_OFFSET_RESET_CONFIG, "earliest");
+    static final String streamsNumOfThreads = envProps.getEnvValue(envProps.NUM_STREAM_THREADS_CONFIG, "3");
+    static final String schemaRegistryUrl = envProps.getEnvValue(envProps.SCHEMA_REGISTRY_URL_CONFIG, "http://localhost:8081");
     //static final String schemaRegistryUrl = "mock://com.harold.kafka.streams.calls.orange.CallsEnrichedAppTest";
     static final String keySerde = "org.apache.kafka.common.serialization.Serdes$StringSerde";
     //static final String valueSerde = GenericAvroSerde.class.getCanonicalName();
     static final String deserializationExceptionHandler = LogAndContinueExceptionHandler.class.getCanonicalName();
+
+    private static Properties createProperties() {
+        Properties config = new Properties();
+        config.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
+        config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, autoOffsetResetPolicy);
+        config.put(StreamsConfig.APPLICATION_ID_CONFIG, clientId);
+        config.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, keySerde);
+        //config.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, valueSerde);
+        config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, endpoints);
+        config.put(StreamsConfig.NUM_STREAM_THREADS_CONFIG, streamsNumOfThreads);
+        config.put(StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG, deserializationExceptionHandler);
+        config.put(KafkaAvroDeserializerConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
+        return config;
+    }
 
     public Topology createTopology() throws IOException {
         // json Serde
@@ -114,22 +128,9 @@ public class CallsEnrichedApp {
     }
 
     public static void main(String[] args) throws IOException {
-        Properties config = new Properties();
 
-        config.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
-        config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, autoOffsetResetPolicy);
-        config.put(StreamsConfig.APPLICATION_ID_CONFIG, clientId);
-        config.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, keySerde);
-        //config.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, valueSerde);
-        config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, endpoints);
-        config.put(StreamsConfig.NUM_STREAM_THREADS_CONFIG, streamsNumOfThreads);
-        config.put(StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG, deserializationExceptionHandler);
-        config.put(KafkaAvroDeserializerConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
-
+        Properties config = createProperties();
         CallsEnrichedApp callsEnrichedApp = new CallsEnrichedApp();
-
-
-
         KafkaStreams streams = new KafkaStreams(callsEnrichedApp.createTopology(), config);
         streams.cleanUp();
         streams.start();
