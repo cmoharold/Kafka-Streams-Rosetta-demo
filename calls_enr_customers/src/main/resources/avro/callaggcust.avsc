@@ -1,0 +1,45 @@
+[
+{"namespace": "com.harold.kafka.streams.schemas.avro",
+ "type": "record",
+ "name": "CallAggregate",
+ "fields": [
+     {"name": "WINDOW_START_TS", "type": "long"},
+     {"name": "ID_TELEF_ORIGEN", "type": "string"},
+     {"name": "CALLS_COUNT", "type": "long"},
+     {"name": "MAX_DURACION_ORIGEN", "type": "long"},
+     {"name": "TOTAL_DURACION_ORIGEN", "type": "long"},
+     {"name": "AVG_DURACION_ORIGEN", "type": "long"}
+ ]
+},
+{"namespace": "com.harold.kafka.streams.schemas.avro",
+ "type": "record",
+ "name": "CallAggregateCust",
+ "fields": [
+     {"name": "id_telef_origen", "type": "string"},
+     {"name": "window_start_ts", "type": "string"},
+     {"name": "window_end_ts", "type": "string"},
+     {"name": "calls_count", "type": "long"},
+     {"name": "max_duracion_origen", "type": "long"},
+     {"name": "total_duracion_origen", "type": "long"},
+     {"name": "avg_duracion_origen", "type": "long"},
+     {"name": "doc_cliente", "type": ["null","string"], "default" : null},
+     {"name": "cliente_orange", "type": ["null","int"], "default" : null},
+     {"name": "days_excliente", "type": ["null","int"], "default" : null},
+     {"name": "operador_actual", "type": ["null","string"], "default" : null},
+     {"name": "riesgo", "type": ["null","string"], "default" : null}
+ ]
+},
+{"namespace": "com.harold.kafka.streams.schemas.avro",
+ "type": "record",
+ "name": "CustomerAggregate",
+ "fields": [
+     {"name": "TELEF_Y_DOC", "type": ["null","string"], "default" : null},
+     {"name": "TELEFONO", "type": ["null","string"], "default" : null},
+     {"name": "DOC_CLIENTE", "type": ["null","string"], "default" : null},
+     {"name": "CLIENTE_ORANGE", "type": ["null","int"], "default" : null},
+     {"name": "DAYS_EXCLIENTE", "type": ["null","int"], "default" : null},
+     {"name": "OPERADOR_ACTUAL", "type": ["null","string"], "default" : null},
+     {"name": "RIESGO", "type": ["null","string"], "default" : null}
+ ]
+}
+]

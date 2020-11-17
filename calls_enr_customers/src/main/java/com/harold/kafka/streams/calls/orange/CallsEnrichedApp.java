@@ -1,159 +1,154 @@
 package com.harold.kafka.streams.calls.orange;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.confluent.kafka.serializers.KafkaAvroDeserializerConfig;
-import io.confluent.kafka.streams.serdes.avro.GenericAvroSerde;
-import org.apache.avro.Schema;
-import org.apache.avro.generic.GenericData;
-import org.apache.avro.generic.GenericRecord;
-import org.apache.commons.lang3.time.DateUtils;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.common.serialization.Deserializer;
-import org.apache.kafka.common.serialization.Serde;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.common.serialization.Serdes;
-import org.apache.kafka.common.serialization.Serializer;
-import org.apache.kafka.common.utils.Bytes;
-import org.apache.kafka.connect.json.JsonDeserializer;
-import org.apache.kafka.connect.json.JsonSerializer;
-import org.apache.kafka.streams.*;
-import org.apache.kafka.streams.errors.LogAndContinueExceptionHandler;
-import org.apache.kafka.streams.kstream.*;
-import org.apache.kafka.streams.state.KeyValueStore;
+import org.apache.kafka.streams.KafkaStreams;
+import org.apache.kafka.streams.KeyValue;
+import org.apache.kafka.streams.StreamsBuilder;
+import org.apache.kafka.streams.StreamsConfig;
+import org.apache.kafka.streams.Topology;
+import org.apache.kafka.streams.kstream.KStream;
+import org.apache.kafka.streams.kstream.KTable;
+import org.apache.kafka.streams.kstream.Produced;
 
+import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.util.*;
-import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.concurrent.CountDownLatch;
 
-import com.harold.kafka.streams.calls.utils.envProps;
+import com.harold.kafka.streams.schemas.avro.CallAggregate;
+import com.harold.kafka.streams.schemas.avro.CallAggregateCust;
+import com.harold.kafka.streams.schemas.avro.CustomerAggregate;
+import io.confluent.kafka.streams.serdes.avro.SpecificAvroSerde;
+
+import static io.confluent.kafka.serializers.AbstractKafkaSchemaSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG;
 
 public class CallsEnrichedApp {
 
-    static final String clientId = envProps.getEnvValue(envProps.APPLICATION_ID_CONFIG, "calls-orange");
-    static final String groupId = envProps.getEnvValue(envProps.GROUP_ID_CONFIG, "rosetta");
-    static final String endpoints = envProps.getEnvValue(envProps.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
-    static final String table_calls = envProps.getEnvValue(envProps.INPUT_TOPIC_CALLS, "CALLS_AGG");
-    static final String table_clientes = envProps.getEnvValue(envProps.INPUT_TOPIC_CUSTOMERS, "CLIENTES_PORTA_SCR_T");
-    static final String stream_call_clientes = envProps.getEnvValue(envProps.OUTPUT_TOPIC, "CALLS_CLIENTES_ENR");
-    static final String autoOffsetResetPolicy = envProps.getEnvValue(envProps.AUTO_OFFSET_RESET_CONFIG, "earliest");
-    static final String streamsNumOfThreads = envProps.getEnvValue(envProps.NUM_STREAM_THREADS_CONFIG, "3");
-    static final String schemaRegistryUrl = envProps.getEnvValue(envProps.SCHEMA_REGISTRY_URL_CONFIG, "http://localhost:8081");
-    //static final String schemaRegistryUrl = "mock://com.harold.kafka.streams.calls.orange.CallsEnrichedAppTest";
-    static final String keySerde = "org.apache.kafka.common.serialization.Serdes$StringSerde";
-    //static final String valueSerde = GenericAvroSerde.class.getCanonicalName();
-    static final String deserializationExceptionHandler = LogAndContinueExceptionHandler.class.getCanonicalName();
+    public Properties buildStreamsProperties(Properties envProps) {
+        Properties props = new Properties();
 
-    private static Properties createProperties() {
-        Properties config = new Properties();
-        config.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
-        config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, autoOffsetResetPolicy);
-        config.put(StreamsConfig.APPLICATION_ID_CONFIG, clientId);
-        config.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, keySerde);
-        //config.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, valueSerde);
-        config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, endpoints);
-        config.put(StreamsConfig.NUM_STREAM_THREADS_CONFIG, streamsNumOfThreads);
-        config.put(StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG, deserializationExceptionHandler);
-        config.put(KafkaAvroDeserializerConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
-        return config;
+        props.put(StreamsConfig.APPLICATION_ID_CONFIG, envProps.getProperty("application.id"));
+        props.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, envProps.getProperty("bootstrap.servers"));
+        props.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
+        props.put(StreamsConfig.DEFAULT_VALUE_SERDE_CLASS_CONFIG, SpecificAvroSerde.class);
+        props.put(SCHEMA_REGISTRY_URL_CONFIG, envProps.getProperty("schema.registry.url"));
+
+        return props;
     }
 
-    public Topology createTopology() throws IOException {
-        // json Serde
-        final Serializer<JsonNode> jsonSerializer = new JsonSerializer();
-        final Deserializer<JsonNode> jsonDeserializer = new JsonDeserializer();
-        final Serde<JsonNode> jsonSerde = Serdes.serdeFrom(jsonSerializer, jsonDeserializer);
-        // string Serde
-        final Serde<String> stringSerde = Serdes.String();
-        // value avro Serde
-        final Serde<GenericRecord> valueAvroSerde = new GenericAvroSerde();
-        valueAvroSerde.configure(getSerdeProperties(), false);
+    public Topology buildTopology(Properties envProps) {
+        final StreamsBuilder builder = new StreamsBuilder();
+        final String customerTopic = envProps.getProperty("customer.topic.name");
+        final String rekeyedCustomerTopic = envProps.getProperty("rekeyed.customer.topic.name");
+        final String callTopic = envProps.getProperty("call.topic.name");
+        final String callCustomersTopic = envProps.getProperty("call.customer.topic.name");
+        final CallCustomerJoiner joiner = new CallCustomerJoiner();
 
-        final InputStream
-                callsAggregateSchema =
-                CallsEnrichedApp.class.getClassLoader()
-                        .getResourceAsStream("callaggcust.avsc");
-        final Schema schema = new Schema.Parser().parse(callsAggregateSchema);
+        KStream<String, CustomerAggregate> customerStream = builder.<String, CustomerAggregate>stream(customerTopic)
+                .map((key, customer) -> new KeyValue<>(String.valueOf(customer.getTELEFONO()), customer));
 
-        StreamsBuilder builder = new StreamsBuilder();
+        customerStream.to(rekeyedCustomerTopic);
 
-        KStream<String, JsonNode> customerEnr = builder.stream(table_clientes, Consumed.with(stringSerde, jsonSerde));
+        KTable<String, CustomerAggregate> customers = builder.table(rekeyedCustomerTopic);
 
-        KStream<String, GenericRecord> callAgg = builder.stream(table_calls, Consumed.with(stringSerde, valueAvroSerde));
+        KStream<String, CallAggregate> calls = builder.<String, CallAggregate>stream(callTopic)
+                .map((key, call) -> new KeyValue<>(String.valueOf(call.getIDTELEFORIGEN()), call));
 
-        KStream<String, GenericRecord> callAggRekeyed = callAgg
-                .selectKey((key, value) -> value.get("ID_TELEF_ORIGEN").toString());
+        KStream<String, CallAggregateCust> callCustomer = calls.leftJoin(customers, joiner);
 
-        // create the initial json object for balances
-        ObjectNode initialCustomer = JsonNodeFactory.instance.objectNode();
-        initialCustomer.put("doc_cliente", "");
-        initialCustomer.put("cliente_orange", 0);
-        initialCustomer.put("days_excliente", 0);
-        initialCustomer.put("operador_actual", "");
-        initialCustomer.put("riesgo", "");
-
-        KTable<String, JsonNode> customerEnrRekeyed = customerEnr
-                .selectKey((key, value) -> value.get("TELEFONO").asText())
-                .groupByKey()
-                .aggregate(
-                        () -> initialCustomer,
-                        (key, value, aggregate) -> value,
-                        Materialized.<String, JsonNode, KeyValueStore<Bytes, byte[]>>as("customer_enr_rekey")
-                                .withKeySerde(Serdes.String())
-                                .withValueSerde(jsonSerde)
-                );
-
-        KStream<String, GenericRecord> callsCustomerJoin = callAggRekeyed
-                .leftJoin(customerEnrRekeyed, (call, customer) -> {
-                    final GenericRecord callCustomer = new GenericData.Record(schema);
-                    callCustomer.put("id_telef_origen", call.get("ID_TELEF_ORIGEN").toString());
-                    callCustomer.put("window_start_ts", getReadableDate(new Long(call.get("WINDOW_START_TS").toString())));
-                    callCustomer.put("window_end_ts", getReadableDatePlusOneHour(new Long(call.get("WINDOW_START_TS").toString())));
-                    callCustomer.put("calls_count", call.get("CALLS_COUNT"));
-                    callCustomer.put("max_duracion_origen", call.get("MAX_DURACION_ORIGEN"));
-                    callCustomer.put("total_duracion_origen", call.get("TOTAL_DURACION_ORIGEN"));
-                    callCustomer.put("avg_duracion_origen", call.get("AVG_DURACION_ORIGEN"));
-                    callCustomer.put("doc_cliente", customer == null ? null : customer.get("DOC_CLIENTE").asText());
-                    callCustomer.put("cliente_orange", customer == null ? null : customer.get("CLIENTE_ORANGE").asInt());
-                    callCustomer.put("days_excliente", customer == null ? null : customer.get("DAYS_EXCLIENTE").asInt());
-                    callCustomer.put("operador_actual", customer == null ? null : customer.get("OPERADOR_ACTUAL").asText());
-                    callCustomer.put("riesgo", customer == null ? null : customer.get("RIESGO").asText());
-                    return callCustomer;
-                });
-
-        callsCustomerJoin.to(stream_call_clientes, Produced.with(stringSerde,valueAvroSerde));
+        callCustomer.to(callCustomersTopic, Produced.with(Serdes.String(), callCustomerAvroSerde(envProps)));
 
         return builder.build();
     }
 
-    public static void main(String[] args) throws IOException {
+    private SpecificAvroSerde<CallAggregateCust> callCustomerAvroSerde(Properties envProps) {
+        SpecificAvroSerde<CallAggregateCust> customerAvroSerde = new SpecificAvroSerde<>();
 
-        Properties config = createProperties();
+        final HashMap<String, String> serdeConfig = new HashMap<>();
+        serdeConfig.put(SCHEMA_REGISTRY_URL_CONFIG,
+                envProps.getProperty("schema.registry.url"));
+
+        customerAvroSerde.configure(serdeConfig, false);
+        return customerAvroSerde;
+    }
+
+    public void createTopics(Properties envProps) {
+        Map<String, Object> config = new HashMap<>();
+        config.put("bootstrap.servers", envProps.getProperty("bootstrap.servers"));
+        AdminClient client = AdminClient.create(config);
+
+        List<NewTopic> topics = new ArrayList<>();
+
+        topics.add(new NewTopic(
+                envProps.getProperty("customer.topic.name"),
+                Integer.parseInt(envProps.getProperty("customer.topic.partitions")),
+                Short.parseShort(envProps.getProperty("customer.topic.replication.factor"))));
+
+        topics.add(new NewTopic(
+                envProps.getProperty("rekeyed.customer.topic.name"),
+                Integer.parseInt(envProps.getProperty("rekeyed.customer.topic.partitions")),
+                Short.parseShort(envProps.getProperty("rekeyed.customer.topic.replication.factor"))));
+
+        topics.add(new NewTopic(
+                envProps.getProperty("call.topic.name"),
+                Integer.parseInt(envProps.getProperty("call.topic.partitions")),
+                Short.parseShort(envProps.getProperty("call.topic.replication.factor"))));
+
+        topics.add(new NewTopic(
+                envProps.getProperty("call.customer.topic.name"),
+                Integer.parseInt(envProps.getProperty("call.customer.topic.partitions")),
+                Short.parseShort(envProps.getProperty("call.customer.topic.replication.factor"))));
+
+        client.createTopics(topics);
+        client.close();
+    }
+
+    public Properties loadEnvProperties(String fileName) throws IOException {
+        Properties envProps = new Properties();
+        FileInputStream input = new FileInputStream(fileName);
+        envProps.load(input);
+        input.close();
+
+        return envProps;
+    }
+
+    public static void main(String[] args) throws Exception {
+
+        if (args.length < 1) {
+            throw new IllegalArgumentException("This program takes one argument: the path to an environment configuration file.");
+        }
+
         CallsEnrichedApp callsEnrichedApp = new CallsEnrichedApp();
-        KafkaStreams streams = new KafkaStreams(callsEnrichedApp.createTopology(), config);
-        streams.cleanUp();
-        streams.start();
+        Properties envProps = callsEnrichedApp.loadEnvProperties(args[0]);
+        Properties streamProps = callsEnrichedApp.buildStreamsProperties(envProps);
+        Topology topology = callsEnrichedApp.buildTopology(envProps);
 
-        // print the topology
-        streams.localThreadsMetadata().forEach(data -> System.out.println(data));
+        callsEnrichedApp.createTopics(envProps);
 
-        // shutdown hook to correctly close the streams application
-        Runtime.getRuntime().addShutdownHook(new Thread(streams::close));
+        final KafkaStreams streams = new KafkaStreams(topology, streamProps);
+        final CountDownLatch latch = new CountDownLatch(1);
+
+        // Attach shutdown handler to catch Control-C.
+        Runtime.getRuntime().addShutdownHook(new Thread("streams-shutdown-hook") {
+            @Override
+            public void run() {
+                streams.close();
+                latch.countDown();
+            }
+        });
+
+        try {
+            streams.start();
+            latch.await();
+        } catch (Throwable e) {
+            System.exit(1);
+        }
+        System.exit(0);
     }
-
-    private static Map<String, String> getSerdeProperties() {
-        return Collections.singletonMap(KafkaAvroDeserializerConfig.SCHEMA_REGISTRY_URL_CONFIG, schemaRegistryUrl);
-    }
-
-    public String getReadableDate(Long epoch) {
-        String date = new SimpleDateFormat("dd/MM/yyyy HH:mm").format(new Date(epoch));
-        return date;
-    }
-
-    public String getReadableDatePlusOneHour(Long epoch) {
-        String date = new SimpleDateFormat("dd/MM/yyyy HH:mm").format(DateUtils.addHours(new Date(epoch),1));
-        return date;
-    }
-
 }

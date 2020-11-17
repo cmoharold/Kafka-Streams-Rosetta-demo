@@ -1,172 +1,164 @@
 package com.harold.kafka.streams.calls.orange;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.confluent.kafka.schemaregistry.client.rest.exceptions.RestClientException;
-import io.confluent.kafka.schemaregistry.client.SchemaRegistryClient;
-import io.confluent.kafka.schemaregistry.testutil.MockSchemaRegistry;
-import io.confluent.kafka.serializers.AbstractKafkaAvroSerDeConfig;
-import io.confluent.kafka.streams.serdes.avro.GenericAvroSerde;
-import io.confluent.kafka.streams.serdes.avro.GenericAvroSerializer;
-import io.confluent.kafka.streams.serdes.avro.GenericAvroDeserializer;
-import io.confluent.kafka.serializers.KafkaAvroDeserializerConfig;
-import org.apache.avro.Schema;
-import org.apache.avro.generic.GenericData;
-import org.apache.avro.generic.GenericRecord;
 import org.apache.kafka.common.serialization.Deserializer;
-import org.apache.kafka.common.serialization.Serde;
-import org.apache.kafka.common.serialization.Serializer;
-import org.apache.kafka.connect.json.JsonDeserializer;
-import org.apache.kafka.connect.json.JsonSerializer;
 import org.apache.kafka.common.serialization.Serdes;
-import org.apache.kafka.common.serialization.StringDeserializer;
-import org.apache.kafka.common.serialization.StringSerializer;
-import org.apache.kafka.streams.*;
-import org.apache.kafka.streams.errors.LogAndContinueExceptionHandler;
-
+import org.apache.kafka.common.serialization.Serializer;
+import org.apache.kafka.streams.TestInputTopic;
+import org.apache.kafka.streams.TestOutputTopic;
+import org.apache.kafka.streams.Topology;
+import org.apache.kafka.streams.TopologyTestDriver;
 import org.junit.After;
-import org.junit.BeforeClass;
-import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.util.Collections;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
+import com.harold.kafka.streams.schemas.avro.CallAggregate;
+import com.harold.kafka.streams.schemas.avro.CallAggregateCust;
+import com.harold.kafka.streams.schemas.avro.CustomerAggregate;
+import io.confluent.kafka.streams.serdes.avro.SpecificAvroDeserializer;
+import io.confluent.kafka.streams.serdes.avro.SpecificAvroSerializer;
+
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.*;
 
 public class CallsEnrichedAppTest {
 
-
+    private final static String TEST_CONFIG_FILE = "configuration/test.properties";
     private TopologyTestDriver testDriver;
-    private TestInputTopic<String, GenericRecord> inputTopicCalls;
-    private TestInputTopic<String, JsonNode> inputTopicCustomers;
-    private TestOutputTopic<String, GenericRecord> outputTopic;
 
-    private StringSerializer stringSerializer = new StringSerializer();
-    private StringDeserializer stringDeserializer = new StringDeserializer();
+    private SpecificAvroSerializer<CustomerAggregate> makeCustomerSerializer(Properties envProps) {
+        SpecificAvroSerializer<CustomerAggregate> serializer = new SpecificAvroSerializer<>();
 
-    private CallsEnrichedApp callsEnrichedApp = new CallsEnrichedApp();
+        Map<String, String> config = new HashMap<>();
+        config.put("schema.registry.url", envProps.getProperty("schema.registry.url"));
+        serializer.configure(config, false);
 
-    private static final String SCHEMA_REGISTRY_SCOPE = CallsEnrichedAppTest.class.getName();
-    private static final String MOCK_SCHEMA_REGISTRY_URL = "mock://" + SCHEMA_REGISTRY_SCOPE;
+        return serializer;
+    }
 
-    final Serializer<JsonNode> jsonSerializer = new JsonSerializer();
-    final Deserializer<JsonNode> jsonDeserializer = new JsonDeserializer();
+    private SpecificAvroSerializer<CallAggregate> makeCallSerializer(Properties envProps) {
+        SpecificAvroSerializer<CallAggregate> serializer = new SpecificAvroSerializer<>();
 
-    final Serde<GenericRecord> genericAvroSerde = new GenericAvroSerde();
+        Map<String, String> config = new HashMap<>();
+        config.put("schema.registry.url", envProps.getProperty("schema.registry.url"));
+        serializer.configure(config, false);
 
-    private Schema schemaCalls;
+        return serializer;
+    }
 
-    private SchemaRegistryClient schemaRegistryClient = MockSchemaRegistry.getClientForScope(SCHEMA_REGISTRY_SCOPE);
+    private SpecificAvroDeserializer<CallAggregateCust> makeCallCustomerDeserializer(Properties envProps) {
+        SpecificAvroDeserializer<CallAggregateCust> deserializer = new SpecificAvroDeserializer<>();
 
-    @Before
-    public void setUpTopologyTestDriver() throws IOException, RestClientException {
-        Properties config = new Properties();
-        config.put(StreamsConfig.APPLICATION_ID_CONFIG, "test");
-        config.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "dummy:1234");
-        config.put(StreamsConfig.DEFAULT_KEY_SERDE_CLASS_CONFIG, Serdes.String().getClass());
-        config.put(StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG, LogAndContinueExceptionHandler.class.getCanonicalName());
-        config.put(KafkaAvroDeserializerConfig.SCHEMA_REGISTRY_URL_CONFIG, MOCK_SCHEMA_REGISTRY_URL);
+        Map<String, String> config = new HashMap<>();
+        config.put("schema.registry.url", envProps.getProperty("schema.registry.url"));
+        deserializer.configure(config, false);
 
+        return deserializer;
+    }
 
+    private List<CallAggregateCust> readOutputTopic(TopologyTestDriver testDriver,
+                                             String topic,
+                                             Deserializer<String> keyDeserializer,
+                                             SpecificAvroDeserializer<CallAggregateCust> makeCallCustomerDeserializer) {
+        List<CallAggregateCust> results = new ArrayList<>();
+        final TestOutputTopic<String, CallAggregateCust>
+                testOutputTopic =
+                testDriver.createOutputTopic(topic, keyDeserializer, makeCallCustomerDeserializer);
+        testOutputTopic
+                .readKeyValuesToList()
+                .forEach(record -> {
+                            if (record != null) {
+                                results.add(record.value);
+                            }
+                        }
+                );
+        return results;
+    }
 
-        Topology topology = callsEnrichedApp.createTopology();
-        testDriver = new TopologyTestDriver(topology, config);
+    @Test
+    public void testJoin() throws IOException {
+        CallsEnrichedApp callsEnrichedApp = new CallsEnrichedApp();
+        Properties envProps = callsEnrichedApp.loadEnvProperties(TEST_CONFIG_FILE);
+        Properties streamProps = callsEnrichedApp.buildStreamsProperties(envProps);
 
-        final InputStream
-                callsAggregateSchema =
-                CallsEnrichedAppTest.class.getClassLoader()
-                        .getResourceAsStream("callagg.avsc");
-        schemaCalls = new Schema.Parser().parse(callsAggregateSchema);
+        CallCustomerJoiner callCustomerJoiner = new CallCustomerJoiner();
 
-        schemaRegistryClient.register(callsEnrichedApp.table_calls + "-value", schemaCalls);
+        String tableTopic = envProps.getProperty("customer.topic.name");
+        String streamTopic = envProps.getProperty("call.topic.name");
+        String outputTopic = envProps.getProperty("call.customer.topic.name");
 
-        genericAvroSerde.configure(
-                Collections.singletonMap(AbstractKafkaAvroSerDeConfig.SCHEMA_REGISTRY_URL_CONFIG, MOCK_SCHEMA_REGISTRY_URL),
-                /*isKey*/ false);
+        Topology topology = callsEnrichedApp.buildTopology(envProps);
+        testDriver = new TopologyTestDriver(topology, streamProps);
 
-        inputTopicCalls =
-                testDriver.createInputTopic(callsEnrichedApp.table_calls, stringSerializer, genericAvroSerde.serializer());
+        Serializer<String> keySerializer = Serdes.String().serializer();
+        SpecificAvroSerializer<CustomerAggregate> customerSerializer = makeCustomerSerializer(envProps);
+        SpecificAvroSerializer<CallAggregate> callSerializer = makeCallSerializer(envProps);
 
-        inputTopicCustomers =
-                testDriver.createInputTopic(callsEnrichedApp.table_clientes, stringSerializer, jsonSerializer);
+        Deserializer<String> stringDeserializer = Serdes.String().deserializer();
+        SpecificAvroDeserializer<CallAggregateCust> valueDeserializer = makeCallCustomerDeserializer(envProps);
 
-        outputTopic =
-                testDriver.createOutputTopic(callsEnrichedApp.stream_call_clientes, stringDeserializer, genericAvroSerde.deserializer());
+        List<CustomerAggregate> customers = new ArrayList<>();
+        customers.add(CustomerAggregate.newBuilder()
+                .setTELEFONO("600000000")
+                .setDOCCLIENTE("0000000R")
+                .setCLIENTEORANGE(0)
+                .setDAYSEXCLIENTE(0)
+                .setOPERADORACTUAL("")
+                .setRIESGO("")
+                .build());
+
+        List<CallAggregate> calls = new ArrayList<>();
+        calls.add(CallAggregate.newBuilder()
+                .setWINDOWSTARTTS(Long.valueOf(1232123412))
+                .setIDTELEFORIGEN("600000000")
+                .setCALLSCOUNT(5)
+                .setMAXDURACIONORIGEN(3)
+                .setTOTALDURACIONORIGEN(12)
+                .setAVGDURACIONORIGEN(2)
+                .build());
+
+        List<CallAggregateCust> callsCustomers = new ArrayList<>();
+        callsCustomers.add(CallAggregateCust.newBuilder()
+                .setIdTelefOrigen("600000000")
+                .setWindowStartTs(callCustomerJoiner.getReadableDate(calls.get(0).getWINDOWSTARTTS()))
+                .setWindowEndTs(callCustomerJoiner.getReadableDatePlusOneHour(calls.get(0).getWINDOWSTARTTS()))
+                .setCallsCount(5)
+                .setMaxDuracionOrigen(3)
+                .setTotalDuracionOrigen(12)
+                .setAvgDuracionOrigen(2)
+                .setDocCliente("0000000R")
+                .setClienteOrange(0)
+                .setDaysExcliente(0)
+                .setOperadorActual("")
+                .setRiesgo("")
+                .build());
+
+        final TestInputTopic<String, CustomerAggregate>
+                customerTestInputTopic =
+                testDriver.createInputTopic(tableTopic, keySerializer, customerSerializer);
+        for (CustomerAggregate customer : customers) {
+            customerTestInputTopic.pipeInput(String.valueOf(customer.getTELEFONO()), customer);
+        }
+
+        final TestInputTopic<String, CallAggregate>
+                callTestInputTopic =
+                testDriver.createInputTopic(streamTopic, keySerializer, callSerializer);
+        for (CallAggregate call : calls) {
+            callTestInputTopic.pipeInput(String.valueOf(call.getIDTELEFORIGEN()), call);
+        }
+
+        List<CallAggregateCust> actualOutput = readOutputTopic(testDriver, outputTopic, stringDeserializer, valueDeserializer);
+
+        assertEquals(callsCustomers, actualOutput);
     }
 
     @After
-    public void closeTestDriver(){
-        if (testDriver != null) {
-            testDriver.close();
-        }
-        MockSchemaRegistry.dropScope(SCHEMA_REGISTRY_SCOPE);
+    public void cleanup() {
+        testDriver.close();
     }
 
-    public GenericRecord getInputRecordCall(String telefono) {
-        GenericRecord callRecord = new GenericData.Record(schemaCalls);
-        callRecord.put("WINDOW_START_TS", Long.valueOf(1232123412));
-        callRecord.put("ID_TELEF_ORIGEN", telefono);
-        callRecord.put("CALLS_COUNT", 5);
-        callRecord.put("MAX_DURACION_ORIGEN", 3);
-        callRecord.put("TOTAL_DURACION_ORIGEN", 12);
-        callRecord.put("AVG_DURACION_ORIGEN", 2);
-        return callRecord;
-    }
-
-    public JsonNode getInputRecordCustomer(String telefono) {
-        ObjectNode customerRecord = JsonNodeFactory.instance.objectNode();
-        customerRecord.put("TELEFONO", telefono);
-        customerRecord.put("DOC_CLIENTE", "0000000R");
-        customerRecord.put("CLIENTE_ORANGE", 0);
-        customerRecord.put("DAYS_EXCLIENTE", 0);
-        customerRecord.put("OPERADOR_ACTUAL", "");
-        customerRecord.put("RIESGO", "");
-        return customerRecord;
-    }
-
-    @Test
-    public void makeSureKeyIsCorrect() {
-        assertTrue(outputTopic.isEmpty());
-        String telefono = "600000000";
-        inputTopicCustomers.pipeInput(telefono,getInputRecordCustomer(telefono));
-        inputTopicCalls.pipeInput(telefono,getInputRecordCall(telefono));
-        assertEquals(outputTopic.readKeyValue().key,telefono);
-        assertTrue(outputTopic.isEmpty());
-    }
-
-    @Test
-    public void makeSureLeftJoinCorrectSomeDataCustomer(){
-        assertTrue(outputTopic.isEmpty());
-        String telefono = "600000000";
-        inputTopicCustomers.pipeInput(telefono,getInputRecordCustomer(telefono));
-        inputTopicCalls.pipeInput(telefono,getInputRecordCall(telefono));
-        assertEquals(outputTopic.readValue().get("DOC_CLIENTE"),getInputRecordCustomer(telefono).get("doc_cliente"));
-        assertTrue(outputTopic.isEmpty());
-    }
-
-    @Test
-    public void makeSureLeftJoinCorrectSomeDataCall(){
-        assertTrue(outputTopic.isEmpty());
-        String telefono = "600000000";
-        inputTopicCustomers.pipeInput(telefono,getInputRecordCustomer(telefono));
-        inputTopicCalls.pipeInput(telefono,getInputRecordCall(telefono));
-        assertEquals(outputTopic.readValue().get("calls_count"),getInputRecordCall(telefono).get("CALLS_COUNT"));
-        assertTrue(outputTopic.isEmpty());
-    }
-
-    @Test
-    public void makeSureCalculationCorrectEndTime(){
-        assertTrue(outputTopic.isEmpty());
-        String telefono = "600000000";
-        inputTopicCustomers.pipeInput(telefono,getInputRecordCustomer(telefono));
-        inputTopicCalls.pipeInput(telefono,getInputRecordCall(telefono));
-        assertEquals(outputTopic.readValue().get("window_end_ts").toString(),
-                callsEnrichedApp.getReadableDatePlusOneHour(((Long) getInputRecordCall(telefono).get("WINDOW_START_TS"))));
-        assertTrue(outputTopic.isEmpty());
-    }
 }
